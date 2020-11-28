@@ -1,0 +1,141 @@
+﻿@page "/"
+@using CitiesDictionary.Shared
+@using CitiesDictionary.Shared.Models
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+
+<input @bind="city.Id" hidden="true" />
+<div class="form-group">
+    <label>
+        Наименование:
+        <input @bind="city.Title" />
+    </label>
+</div>
+<div class="form-group">
+    <label>
+        Численность населения:
+        <input @bind="city.Population" />
+    </label>
+</div>
+<div class="form-group">
+    <label>
+        Дата основания:
+        <input @bind="city.FoundationDate" type="date" />
+    </label>
+</div>
+<button @onclick="Save" disabled="@(!IsConnected)">Сохранить</button>
+
+<hr>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Идентификатор</th>
+            <th>Наименование</th>
+            <th>Численность населения</th>
+            <th>Дата основания</th>
+            <th></th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var entry in cities)
+        {
+            <tr class="table-row">
+                <td>@entry.Id</td>
+                <td>@entry.Title</td>
+                <td>@entry.Population</td>
+                <td>@entry.FoundationDate.ToShortDateString()</td>
+                <td>
+                    <button @onclick="() => Edit(entry.Id)">Изменить</button>
+                </td>
+                <td>
+                    <button @onclick="() => Delete(entry.Id)">Удалить</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+@code {
+    private HubConnection hubConnection;
+    private List<City> cities = new List<City>();
+    private City city = new City();
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/citieshub"))
+            .Build();
+
+        hubConnection.On<City>(nameof(ICitiesClient.ReceiveCity), ReceiveCityHandler);
+
+        hubConnection.On<IEnumerable<City>>(nameof(ICitiesClient.Initialize), InitializeHandler);
+
+        hubConnection.On<int>(nameof(ICitiesClient.CityDeleted), CityDeletedHandler);
+
+        await hubConnection.StartAsync();
+    }
+
+
+
+    async Task Save()
+    {
+        await hubConnection.SendAsync("SaveCity", city);
+        city = new City();
+    }
+
+    void Edit(int id)
+    {
+        var city = cities.Find(c => c.Id == id);
+        this.city.Id = city.Id;
+        this.city.FoundationDate = city.FoundationDate;
+        this.city.Population = city.Population;
+        this.city.Title = city.Title;
+    }
+
+    async Task Delete(int id)
+    {
+        await hubConnection.SendAsync("DeleteCity", id);
+    }
+
+
+
+    void InitializeHandler(IEnumerable<City> cities)
+    {
+        this.cities.InsertRange(0, cities);
+        StateHasChanged();
+    }
+
+    void CityDeletedHandler(int id)
+    {
+        cities.Remove(cities.Find(c => c.Id == id));
+        StateHasChanged();
+    }
+
+    void ReceiveCityHandler(City city)
+    {
+        var existingCity = cities.Find(c => c.Id == city.Id);
+        if (existingCity == null)
+        {
+            cities.Add(city);
+        }
+        else
+        {
+            existingCity.FoundationDate = city.FoundationDate;
+            existingCity.Population = city.Population;
+            existingCity.Title = city.Title;
+        }
+        StateHasChanged();
+    }
+
+
+
+    public bool IsConnected =>
+        hubConnection.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        await hubConnection.DisposeAsync();
+    }
+}
